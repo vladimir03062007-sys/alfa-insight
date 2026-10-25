@@ -208,7 +208,7 @@ func (a *App) Routes() http.Handler {
 		a.mu.Unlock()
 		out := map[string]any{"insights": m.Insights, "questions": m.Questions, "revisions": m.Revisions,
 			"llm_fallbacks": m.LLMFallbacks, "llm_usage_today": usageSnapshot(), "llm_daily_token_limit": cfg.LLMDailyTokenLimit,
-			"llm_daily_budget_rub": cfg.LLMDailyBudgetRub, "llm_prices_known": len(cfg.LLMPrices) > 0, "llm_routing": llmRouting()}
+			"llm_daily_budget_rub": cfg.LLMDailyBudgetRub, "llm_prices_known": len(cfg.LLMPrices) > 0, "llm_cost_source": llmCostSource(), "llm_routing": llmRouting()}
 		if m.Insights > 0 {
 			out["self_check_pass_rate"] = round(float64(m.SelfCheckPassed)/float64(m.Insights), 3)
 			out["bank_view_coverage"] = round(float64(m.WithBankView)/float64(m.Insights), 3)

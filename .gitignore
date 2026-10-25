@@ -3,6 +3,7 @@
 # сборка
 /alfa-insight
 /alfa-insight.exe
+/alfa-insight.exe~
 # результаты и состояние (генерируются при работе)
 /output/*
 !/output/.gitkeep

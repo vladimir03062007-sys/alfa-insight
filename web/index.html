@@ -495,15 +495,26 @@ async function renderProfile(){
 
 async function renderQuality(){
   const m = await api("/api/metrics");
+  const rub = x=>x?x.toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}):"—";
   const pct = x=>x===undefined?"—":Math.round(x*100)+"%";
   $("#view-quality").innerHTML = `<div class="grid home">
     <div class="card"><h3>Инсайтов сгенерировано</h3><div class="big">${m.insights}</div><div class="small muted">вопросов: ${m.questions}, доработок после самопроверки: ${m.revisions}</div></div>
     <div class="card"><h3>Самопроверка пройдена</h3><div class="big">${pct(m.self_check_pass_rate)}</div><div class="small muted">с позицией банка: ${pct(m.bank_view_coverage)}, средняя уверенность: ${pct(m.avg_confidence)}</div></div>
     <div class="card"><h3>Обратная связь</h3><div class="big">👍 ${m.feedback.like} · 👎 ${m.feedback.dislike}</div><div class="small muted">учитывается в ранжировании ленты</div></div>
     <div class="card" style="grid-column:1/-1"><h3>Режим работы</h3><div>${state.health.llm_enabled?"Языковые модели подключены: интерпретации пишет модель, проверяет другая модель.":"Языковые модели не подключены: агент работает по правилам (план, инструменты, самопроверка), тексты формируются шаблонами."} Лента: ${esc({reference:"демонстрационный набор новостей",holdout:"отложенный набор новостей для проверки",live:"новости из RSS-источников",file:"новости из файла"}[state.health.news_mode]||state.health.news_mode)}. Компаний в базе: ${state.health.companies.toLocaleString("ru-RU")}, материалов банка: ${state.health.analytics_docs}.</div></div>
-    <div class="card" style="grid-column:1/-1"><h3>LLM: расход за сегодня (этот экземпляр сервиса)</h3><div>Вызовов: ${m.llm_usage_today.calls||0}, из кэша: ${m.llm_usage_today.cache_hits||0}, токенов: ${(m.llm_usage_today.prompt_tokens||0)+(m.llm_usage_today.completion_tokens||0)} из ${m.llm_daily_token_limit}${m.llm_prices_known?`, ≈ ${(m.llm_usage_today.cost_rub||0).toFixed(2)} ₽ из ${m.llm_daily_budget_rub} ₽`:" (цены моделей не заданы — учёт в ₽ выключен)"}. Переходов в офлайн: ${m.llm_fallbacks}</div>
+    <div class="card" style="grid-column:1/-1"><h3>LLM: расход за сегодня (этот экземпляр сервиса)</h3><div>Вызовов: ${m.llm_usage_today.calls||0}, из кэша: ${m.llm_usage_today.cache_hits||0}, токенов: ${(m.llm_usage_today.prompt_tokens||0)+(m.llm_usage_today.completion_tokens||0)} из ${m.llm_daily_token_limit}. Переходов в офлайн: ${m.llm_fallbacks}</div>
+    ${m.llm_cost_source==="none"
+      ? `<div class="small muted" style="margin-top:6px">Расход в ₽ не считается: шлюз не сообщает стоимость и цены LLM_PRICE_* не заданы.</div>`
+      : `<div style="margin-top:6px"><span class="big">${rub(m.llm_usage_today.cost_rub)} ₽</span> <span class="muted">из ${m.llm_daily_budget_rub} ₽ — доля этого экземпляра · ${m.llm_cost_source==="gateway"?"фактическая стоимость по данным шлюза организаторов":"оценка по ценам LLM_PRICE_*"}</span></div>
+         <div style="height:8px;background:#eee;border-radius:4px;margin:6px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100,(m.llm_usage_today.cost_rub||0)/m.llm_daily_budget_rub*100).toFixed(1)}%;background:#ef3124"></div></div>`}
     <div class="small muted">Лимит 500 ₽/день общий на команду и все модели — следите за суммарным расходом.</div>
-    <div class="small muted">По моделям: ${esc(JSON.stringify(m.llm_usage_today.by_model||{}))}</div>
+    ${(()=>{
+      // Расход по моделям показываем, только если разбивка есть по всем вызовам дня (иначе — только токены).
+      const u=m.llm_usage_today, byCost=u.cost_by_model||{};
+      const full=m.llm_cost_source!=="none" && (u.cost_rub||0)-Object.values(byCost).reduce((a,b)=>a+b,0)<=0.01;
+      return `<table class="kv" style="margin-top:8px"><tr><td><b>Модель</b></td><td><b>Токенов за сегодня</b></td>${full?"<td><b>Расход, ₽</b></td>":""}</tr>${Object.entries(u.by_model||{}).sort((a,b)=>b[1]-a[1]).map(([mdl,tok])=>`<tr><td>${esc(mdl)}</td><td>${tok.toLocaleString("ru-RU")}</td>${full?`<td>${rub(byCost[mdl])}</td>`:""}</tr>`).join("")}</table>`;
+    })()}
+    <h4 style="margin-top:12px">Какая модель решает какую задачу</h4>
     <table class="kv" style="margin-top:8px">${Object.entries(m.llm_routing||{}).map(([t,ms])=>`<tr><td>${esc({plan:"План агента",write:"Интерпретация события",critic:"Самопроверка (критик)",answer:"Ответы на вопросы",research:"Вопросы о взаимосвязях",vision:"Графики/сканы в PDF"}[t]||t)}</td><td>${esc(ms.join(" → резерв: "))}</td></tr>`).join("")}</table></div></div>`;
 }
 
