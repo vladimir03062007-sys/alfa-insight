@@ -48,8 +48,8 @@ var ErrNoLLM = errors.New("LLM не настроена (нет LLM_BASE_URL / LL
 //	fast      — Gemma 4 26B A4B: невысокая сложность (план агента, классификация, извлечение);
 //	reasoning — GLM-5.3-Flash: глубокий анализ и рассуждения (интерпретация события);
 //	general   — Qwen3.6 35B A3B: универсальная (ответы на вопросы, резерв);
-//	research  — DeepSeek-V4.1-Flash: поиск взаимосвязей, большие объёмы (вопросы по всей ленте);
-//	text      — Kimi-K2.6: обработка и анализ текста (критик-проверяющий, резерв писателя);
+//	research  — DeepSeek-V4.1-Flash: поиск взаимосвязей, большие объёмы (вопросы по всей ленте, критик-проверяющий);
+//	text      — Kimi-K2.6: обработка и анализ текста (резерв писателя; критиком не ставим — на шлюзе дорого рассуждает);
 //	vision    — Qwen3-VL-30B-A3B-Instruct: изображения (графики/сканы в PDF аналитики банка).
 func modelForRole(role string) string {
 	switch role {
@@ -75,7 +75,7 @@ var modelRoles = []string{"fast", "reasoning", "general", "research", "text", "v
 var taskChains = map[string][]string{
 	"plan":     {"fast", "general"},
 	"write":    {"reasoning", "text", "general"},
-	"critic":   {"text", "fast"},
+	"critic":   {"research", "fast"},
 	"answer":   {"general", "reasoning"},
 	"research": {"research", "general"},
 	"vision":   {"vision"},
@@ -87,6 +87,17 @@ func modelFor(task string) string {
 		return modelForRole(chain[0])
 	}
 	return modelForRole(task)
+}
+
+// thinkingModel — модели с режимом рассуждений: GLM, Kimi, Qwen3.6, DeepSeek.
+func thinkingModel(model string) bool {
+	m := strings.ToLower(model)
+	for _, p := range []string{"glm", "kimi", "qwen3.6", "deepseek"} {
+		if strings.Contains(m, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func modelAllowed(model string) bool {
@@ -128,6 +139,9 @@ func Chat(task string, messages []ChatMessage, maxTokens int, actor string) (*LL
 
 var errAuth = errors.New("ключ не принят API (401/403)")
 
+// reasoningMaxTokens — лимит для повтора, когда рассуждения модели не оставили места для ответа.
+const reasoningMaxTokens = 12000
+
 // chatModel — один запрос к конкретной модели. messages — []ChatMessage или
 // мультимодальные сообщения (для vision-модели), estTokens — оценка входа для бюджета.
 func chatModel(model string, messages any, estTokens, maxTokens int, actor string) (*LLMResult, error) {
@@ -142,6 +156,12 @@ func chatModel(model string, messages any, estTokens, maxTokens int, actor strin
 		"model": model, "messages": messages, "temperature": cfg.LLMTemperature,
 		"max_tokens": maxTokens, "stream": false,
 	}
+	if !cfg.LLMThinking && thinkingModel(model) {
+		// Рассуждения оплачиваются как выход и съедают max_tokens: на шлюзе организаторов они
+		// в 4–7 раз удорожают вызов. Gemma и Qwen3-VL не трогаем: reasoning_effort у Gemma, наоборот, включает рассуждения.
+		payload["thinking"] = map[string]string{"type": "disabled"}
+		payload["reasoning_effort"] = "low"
+	}
 	body, _ := json.Marshal(payload)
 	sum := sha256.Sum256(body)
 	key := hex.EncodeToString(sum[:])[:32]
@@ -152,7 +172,7 @@ func chatModel(model string, messages any, estTokens, maxTokens int, actor strin
 		if err := readJSON(cachePath, &cached); err == nil && cached.Text != "" {
 			cached.Cached = true
 			cached.CostRub = 0
-			recordUsage(model, 0, 0, true)
+			recordUsage(model, 0, 0, true, 0)
 			return &cached, nil
 		}
 	}
@@ -185,14 +205,16 @@ func chatModel(model string, messages any, estTokens, maxTokens int, actor strin
 	}
 	var r struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content          string `json:"content"`
 				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
+			PromptTokens     int     `json:"prompt_tokens"`
+			CompletionTokens int     `json:"completion_tokens"`
+			Cost             float64 `json:"cost"` // стоимость вызова от шлюза, ₽
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -202,13 +224,24 @@ func chatModel(model string, messages any, estTokens, maxTokens int, actor strin
 		return nil, fmt.Errorf("LLM вернула пустой ответ")
 	}
 	text := stripThinking(r.Choices[0].Message.Content)
+	if strings.TrimSpace(text) == "" {
+		// Рассуждающие модели (GLM, Kimi, Qwen3.6, DeepSeek) тратят max_tokens и на reasoning:
+		// если лимит кончился до ответа, повторяем один раз с запасом, иначе — ошибка, и Chat
+		// переходит к резервной модели. Пустой ответ не кэшируется.
+		if r.Choices[0].FinishReason == "length" && maxTokens < reasoningMaxTokens {
+			logWarn("модель %s израсходовала лимит %d токенов на рассуждения, повтор с %d", model, maxTokens, reasoningMaxTokens)
+			return chatModel(model, messages, estTokens, reasoningMaxTokens, actor)
+		}
+		audit(AuditRecord{Kind: "llm", Actor: actor, Name: model, Result: "пустой ответ, finish_reason=" + r.Choices[0].FinishReason})
+		return nil, fmt.Errorf("LLM вернула пустой ответ (finish_reason=%s)", r.Choices[0].FinishReason)
+	}
 	res := &LLMResult{Text: text, Model: model, PromptTokens: r.Usage.PromptTokens,
 		CompletionTokens: r.Usage.CompletionTokens, DurationMs: time.Since(start).Milliseconds()}
 	if res.PromptTokens == 0 {
 		res.PromptTokens = estTokens
 		res.CompletionTokens = runeLen(text) / 3
 	}
-	res.CostRub = recordUsage(model, res.PromptTokens, res.CompletionTokens, false)
+	res.CostRub = recordUsage(model, res.PromptTokens, res.CompletionTokens, false, r.Usage.Cost)
 	audit(AuditRecord{Kind: "llm", Actor: actor, Name: model,
 		Result: fmt.Sprintf("ok, tokens=%d+%d, %.3f ₽, %dms", res.PromptTokens, res.CompletionTokens, res.CostRub, res.DurationMs)})
 	if cfg.LLMCache {

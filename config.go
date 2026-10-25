@@ -33,6 +33,7 @@ type Config struct {
 	LLMTimeoutSec      int
 	LLMMaxAgentSteps   int  // максимум шагов агента (tool calls) на один инсайт
 	LLMCache           bool // кэшировать ответы LLM на диске (экономия токенов)
+	LLMThinking        bool // рассуждения (thinking) у GLM, Kimi, Qwen3.6, DeepSeek: по умолчанию выключены ради бюджета
 	LLMMode            string
 
 	// ---- эмбеддинги ----
@@ -198,6 +199,7 @@ func loadConfig() *Config {
 		LLMTimeoutSec:      getenvInt("LLM_TIMEOUT", 120),
 		LLMMaxAgentSteps:   getenvInt("LLM_MAX_AGENT_STEPS", 6),
 		LLMCache:           getenvBool("LLM_CACHE", true),
+		LLMThinking:        getenvBool("LLM_THINKING", false),
 		LLMMode:            strings.ToLower(getenv("LLM_MODE", "auto")),
 
 		EmbeddingProvider: strings.ToLower(getenv("EMBEDDING_PROVIDER", "tfidf")),

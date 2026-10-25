@@ -105,13 +105,15 @@ func audit(rec AuditRecord) {
 // ---------- бюджет токенов ----------
 
 type usageState struct {
-	Date             string         `json:"date"`
-	PromptTokens     int            `json:"prompt_tokens"`
-	CompletionTokens int            `json:"completion_tokens"`
-	Calls            int            `json:"calls"`
-	CacheHits        int            `json:"cache_hits"`
-	ByModel          map[string]int `json:"by_model"`
-	CostRub          float64        `json:"cost_rub"` // считается, если заданы цены LLM_PRICE_*
+	Date             string             `json:"date"`
+	PromptTokens     int                `json:"prompt_tokens"`
+	CompletionTokens int                `json:"completion_tokens"`
+	Calls            int                `json:"calls"`
+	CacheHits        int                `json:"cache_hits"`
+	ByModel          map[string]int     `json:"by_model"`
+	CostRub          float64            `json:"cost_rub"` // по usage.cost шлюза, иначе по ценам LLM_PRICE_*
+	CostByModel      map[string]float64 `json:"cost_by_model"`
+	CostFromGateway  bool               `json:"cost_from_gateway"` // стоимость пришла от шлюза организаторов
 }
 
 // costRub — стоимость вызова по ценам из настроек (0, если цена модели не задана).
@@ -134,6 +136,10 @@ func budgetAllows(model string, prompt, maxCompletion int) bool {
 		return false
 	}
 	if _, ok := cfg.LLMPrices[model]; ok && u.CostRub+costRub(model, prompt, maxCompletion) > cfg.LLMDailyBudgetRub {
+		return false
+	}
+	// Фактический расход по usage.cost шлюза: лимит работает и без заданных цен.
+	if cfg.LLMDailyBudgetRub > 0 && u.CostRub >= cfg.LLMDailyBudgetRub {
 		return false
 	}
 	return true
@@ -168,7 +174,9 @@ func budgetLeft() int {
 	return cfg.LLMDailyTokenLimit - u.PromptTokens - u.CompletionTokens
 }
 
-func recordUsage(model string, prompt, completion int, cacheHit bool) float64 {
+// recordUsage учитывает вызов. apiCost — стоимость из ответа шлюза организаторов (usage.cost, ₽);
+// если шлюз её не вернул, стоимость считается по ценам LLM_PRICE_*.
+func recordUsage(model string, prompt, completion int, cacheHit bool, apiCost float64) float64 {
 	usageMu.Lock()
 	defer usageMu.Unlock()
 	u := currentUsage()
@@ -176,7 +184,16 @@ func recordUsage(model string, prompt, completion int, cacheHit bool) float64 {
 	if cacheHit {
 		u.CacheHits++
 	} else {
-		cost = costRub(model, prompt, completion)
+		cost = apiCost
+		if cost > 0 {
+			u.CostFromGateway = true
+		} else {
+			cost = costRub(model, prompt, completion)
+		}
+		if u.CostByModel == nil {
+			u.CostByModel = map[string]float64{}
+		}
+		u.CostByModel[model] += cost
 		u.PromptTokens += prompt
 		u.CompletionTokens += completion
 		u.Calls++
@@ -185,6 +202,20 @@ func recordUsage(model string, prompt, completion int, cacheHit bool) float64 {
 	}
 	_ = writeJSON(usagePath(), u)
 	return cost
+}
+
+// llmCostSource — откуда берётся расход в рублях: gateway (usage.cost шлюза), prices (LLM_PRICE_*) или none.
+func llmCostSource() string {
+	u := usageSnapshot()
+	switch {
+	case u.CostFromGateway, u.CostRub > 0 && len(cfg.LLMPrices) == 0:
+		return "gateway"
+	case len(cfg.LLMPrices) > 0:
+		return "prices"
+	case cfg.LLMEnabled() && u.Calls == 0:
+		return "gateway" // шлюз организаторов сообщает стоимость в каждом ответе; вызовов сегодня ещё не было
+	}
+	return "none"
 }
 
 func usageSnapshot() usageState {
