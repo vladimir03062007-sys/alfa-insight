@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    image: alfa-insight:latest
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env            # LLM_BASE_URL, LLM_API_KEY и др. (скопируйте из .env.example)
+    environment:
+      APP_ROOT: /app
+    volumes:
+      - ./data/company:/app/data/company:ro               # CSV организаторов
+      - ./data/alfa_analytics:/app/data/alfa_analytics:ro # материалы Альфа-Банка
+      - ./output:/app/output                              # инсайты, трассировки, audit.log
+      - ./data/state:/app/data/state                      # обратная связь, кэш и учёт токенов LLM
+    restart: unless-stopped

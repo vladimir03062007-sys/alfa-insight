@@ -1,0 +1,17 @@
+{
+  "_comment": "Веса персонализированного ранжирования. Меняются без изменения кода.",
+  "weights": {
+    "exposure": 0.38,
+    "sector": 0.17,
+    "semantic": 0.10,
+    "region": 0.05,
+    "freshness": 0.10,
+    "credibility": 0.06,
+    "alfa": 0.06,
+    "feedback": 0.15
+  },
+  "min_score": 0.22,
+  "noise_penalty": 0.3,
+  "freshness_half_life_days": 5,
+  "dedup_threshold": 0.55
+}

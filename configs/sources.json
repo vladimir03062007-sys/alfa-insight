@@ -1,0 +1,13 @@
+{
+  "_comment": "Источники для режима NEWS_MODE=live. kind: rss | telegram | auto (автопоиск RSS на странице). Недоступные источники пропускаются с предупреждением. Проверьте адреса перед демонстрацией.",
+  "sources": [
+    {"id": "cbr", "name": "Банк России — новости", "url": "https://www.cbr.ru/rss/eventrss", "kind": "rss", "credibility": 0.95},
+    {"id": "interfax", "name": "Интерфакс", "url": "https://www.interfax.ru/rss.asp", "kind": "rss", "credibility": 0.9},
+    {"id": "rbc", "name": "РБК", "url": "https://rssexport.rbc.ru/rbcnews/news/30/full.rss", "kind": "rss", "credibility": 0.85},
+    {"id": "kommersant_econ", "name": "Коммерсантъ — Экономика", "url": "https://www.kommersant.ru/RSS/section-economics.xml", "kind": "rss", "credibility": 0.85},
+    {"id": "vedomosti", "name": "Ведомости", "url": "https://www.vedomosti.ru/rss/news", "kind": "rss", "credibility": 0.85},
+    {"id": "lenta_econ", "name": "Лента.ру — Экономика", "url": "https://lenta.ru/rss/news/economics", "kind": "rss", "credibility": 0.7},
+    {"id": "prime", "name": "ПРАЙМ", "url": "https://1prime.ru/export/rss2/index.xml", "kind": "rss", "credibility": 0.8},
+    {"id": "tg_example", "name": "Пример Telegram-канала", "url": "https://t.me/s/CHANNEL_NAME", "kind": "telegram", "credibility": 0.6, "enabled": false}
+  ]
+}

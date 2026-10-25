@@ -1,0 +1,12 @@
+# секреты
+.env
+# сборка
+/alfa-insight
+/alfa-insight.exe
+# результаты и состояние (генерируются при работе)
+/output/*
+!/output/.gitkeep
+/data/state/*
+!/data/state/.gitkeep
+# PDF кейса большие (~90 МБ) — в репозитории хранятся расшифровки в data/alfa_analytics/_text/
+/data/alfa_analytics/*.pdf

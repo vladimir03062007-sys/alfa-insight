@@ -1,0 +1,133 @@
+openapi: 3.0.3
+info:
+  title: alfa-insight API
+  version: "1.0"
+  description: Персонализированная новостная аналитика для руководителей крупного бизнеса (прототип для хакатона).
+servers: [{url: http://localhost:8080}]
+paths:
+  /api/health:
+    get: {summary: Состояние сервиса, responses: {"200": {description: OK}}}
+  /api/roles:
+    get: {summary: Роли пользователей, responses: {"200": {description: Список ролей}}}
+  /api/companies:
+    get:
+      summary: Список компаний
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, default: 50}}
+        - {name: large, in: query, description: "1 — только выручка > 15 млрд ₽", schema: {type: string}}
+      responses: {"200": {description: Компании, отсортированные по выручке}}
+  /api/companies/{id}:
+    get:
+      summary: Бизнес-контекст компании (признаки, чувствительность к факторам, контрагенты)
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: CompanyProfile}, "404": {description: Не найдена}}
+  /api/feed:
+    get:
+      summary: Персонализированная лента событий
+      parameters:
+        - {name: company, in: query, required: true, schema: {type: string}}
+        - {name: role, in: query, schema: {type: string, enum: [owner, ceo, cfo, chief_accountant, treasury, clevel, employee], default: cfo}}
+        - {name: factor, in: query, description: "Фильтр по фактору (key_rate, fx_rub, ...)", schema: {type: string}}
+        - {name: all, in: query, description: "1 — включить отфильтрованные как нерелевантные", schema: {type: string}}
+      responses: {"200": {description: "items[]: event, score, components, reasons, matches, impact, shown"}}
+  /api/events/{id}:
+    get:
+      summary: Событие (дедуплицированное, размеченное)
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: EventView}}
+  /api/insight:
+    get:
+      summary: Персонализированная интерпретация события (запускает агента)
+      parameters:
+        - {name: company, in: query, required: true, schema: {type: string}}
+        - {name: role, in: query, schema: {type: string}}
+        - {name: event, in: query, required: true, schema: {type: string}}
+        - {name: force, in: query, description: "1 — пересчитать, игнорируя кэш", schema: {type: string}}
+      responses:
+        "200":
+          description: Insight
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Insight"}
+  /api/ask:
+    post:
+      summary: Уточняющий вопрос к аналитике
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {company: {type: string}, role: {type: string}, event: {type: string}, question: {type: string}}
+      responses: {"200": {description: "Answer: answer, sections[], sources[], trace_id"}}
+  /api/feedback:
+    post:
+      summary: Оценка события (влияет на ранжирование)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {company: {type: string}, role: {type: string}, event: {type: string}, vote: {type: string, enum: [like, dislike]}, comment: {type: string}}
+      responses: {"200": {description: saved}}
+  /api/trace/{id}:
+    get:
+      summary: Трассировка агента (план, вызовы инструментов, LLM, самопроверка)
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: Trace}}
+  /api/analytics:
+    get: {summary: Загруженные материалы Альфа-Банка, responses: {"200": {description: OK}}}
+  /api/forecasts:
+    get:
+      summary: Прогнозы банка (ставка, инфляция, курс, ВВП), извлечённые из материалов, история пересмотров, календарь заседаний и список материалов с актуальностью
+      parameters: [{name: factor, in: query, schema: {type: string}, description: "фильтр по фактору: key_rate, inflation, fx_rub, gdp_growth"}]
+      responses: {"200": {description: OK}}
+  /api/scenario:
+    get:
+      summary: Калькулятор «что если» — эффект ставки и курса в рублях для компании
+      parameters:
+        - {name: company, in: query, required: true, schema: {type: string}}
+        - {name: revenue, in: query, schema: {type: number}, description: "выручка, млрд ₽"}
+        - {name: debt, in: query, schema: {type: number}, description: "долг, млрд ₽"}
+        - {name: floating, in: query, schema: {type: number}, description: "доля долга с плавающей ставкой, %"}
+        - {name: export, in: query, schema: {type: number}, description: "доля валютной выручки, %"}
+        - {name: import, in: query, schema: {type: number}, description: "доля валютных затрат, % выручки"}
+      responses: {"200": {description: "допущения (с источниками), сценарии, результаты в ₽ и % выручки"}}
+  /api/metrics:
+    get: {summary: Метрики качества, обратная связь и расход токенов, responses: {"200": {description: OK}}}
+  /api/refresh:
+    post:
+      summary: Перезагрузить новости
+      parameters: [{name: mode, in: query, schema: {type: string, enum: [reference, live, holdout]}}]
+      responses: {"200": {description: OK}}
+components:
+  schemas:
+    Point:
+      type: object
+      properties:
+        text: {type: string}
+        basis: {type: array, items: {type: string}, description: "ID источников: N* — новость, A* — аналитика банка, C:* — поле данных клиента, R:* — связанная новость"}
+        horizon: {type: string}
+        origin: {type: string, enum: [fact, bank, model]}
+    Insight:
+      type: object
+      properties:
+        insight_id: {type: string}
+        company_id: {type: string}
+        role: {type: string}
+        event_id: {type: string}
+        mode: {type: string, description: "llm | offline | llm-unavailable→offline"}
+        models_used: {type: array, items: {type: string}}
+        headline: {type: string}
+        impact: {type: string, enum: [risk, opportunity, mixed, neutral]}
+        relevance: {type: number}
+        confidence: {type: number}
+        what_happened: {type: object, description: "1. Что произошло — summary, facts[{text, source_ids, status: confirmed|reported|assumption}], participants, date"}
+        why_it_matters: {type: object, description: "2. Почему важно — text, client_features[{name,value,field}], relevance_reasons, basis"}
+        consequences: {type: object, description: "3. Последствия — risks[Point], opportunities[Point], factors_to_watch"}
+        actions: {type: array, description: "4. Действия — {text, type: action|question|scenario, basis}"}
+        bank_view: {type: object, description: "5. Позиция Альфа-Банка — только из материалов банка: summary, citations[{id, doc_title, quote}]"}
+        model_conclusions: {type: array, items: {$ref: "#/components/schemas/Point"}, description: Выводы AI (отделены от позиции банка)}
+        product_hint: {type: object, description: "Нативная реклама продукта, помечена label=Реклама"}
+        sources: {type: array, description: "6. На чём основан вывод — реестр источников"}
+        self_check: {type: object, description: "passed, iterations, checks{completeness, grounding, numbers, consistency, bank_separation, safety}, issues, fixes"}
+        trace_id: {type: string}
